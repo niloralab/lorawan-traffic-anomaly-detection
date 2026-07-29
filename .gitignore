@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+
+# IDE files
+.vscode/
+.idea/
+
+# Large or sensitive network captures
+*.pcap
+*.pcapng
+
+# Generated files
+results/*.png
+results/*.csv
+
+# Operating system
+.DS_Store
