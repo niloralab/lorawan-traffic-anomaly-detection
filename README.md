@@ -1,4 +1,4 @@
-# Network Traffic Anomaly Detection
+# LoRaWAN Traffic Anomaly Detection
 
 A beginner-friendly machine learning project for analysing LoRaWAN network traffic and detecting anomalous behaviour.
 
@@ -11,7 +11,7 @@ A beginner-friendly machine learning project for analysing LoRaWAN network traff
 - Build a simple baseline machine learning model
 - Evaluate and interpret the detected anomalies
 
-## Possible features
+## Traffic features
 
 The following traffic features were initially considered:
 
@@ -22,43 +22,30 @@ The following traffic features were initially considered:
 - Packet rate
 - Retransmissions
 
-After inspecting the available LoRaWAN gateway logs, the first version
-of the project focuses on the following features:
+After inspecting the available LoRaWAN gateway logs, the first version of the project focuses on the following features:
 
-- **RSSI (Received Signal Strength Indicator):** Measures the strength
-  of the signal received by the gateway. Unusual changes may indicate
-  interference, movement, or changes in the communication environment.
+- **RSSI (Received Signal Strength Indicator):** Measures the strength of the signal received by the gateway. Unusual changes may indicate interference, movement, or changes in the communication environment.
 
-- **SNR (Signal-to-Noise Ratio):** Describes the quality of the received
-  signal relative to background noise. Sudden changes may indicate
-  degraded or unusual radio conditions.
+- **SNR (Signal-to-Noise Ratio):** Describes the quality of the received signal relative to background noise. Sudden changes may indicate degraded or unusual radio conditions.
 
-- **Payload size:** Represents the number of bytes carried by an uplink.
-  Changes in payload size may reveal changes in device behaviour even
-  when the payload content is encrypted.
+- **Payload size:** Represents the number of bytes carried by an uplink. Changes in payload size may reveal changes in traffic behaviour even when the payload content is encrypted.
 
-- **Inter-arrival time:** Measures the time between consecutive uplink
-  observations associated with the same DevAddr. Unexpected bursts or
-  long silent periods may represent unusual behaviour.
+- **Inter-arrival time:** Measures the time between consecutive uplink observations within the same temporally segmented DevAddr group. Unexpected bursts or long silent periods may represent unusual behaviour.
 
-- **Frame counter gap:** Measures the difference between consecutive
-  LoRaWAN frame counters. Zero, negative, or unusually large gaps may
-  require further investigation.
+- **Frame counter gap:** Measures the difference between consecutive LoRaWAN frame counters. Zero, negative, or unusually large gaps may require further investigation.
 
-- **Possible retransmission or frame counter reuse:** An unchanged frame
-  counter may indicate a retransmission, but it may also result from
-  counter reuse in a different session.
+- **Possible retransmission or frame counter reuse:** An unchanged frame counter may indicate a retransmission, but it may also result from counter reuse or an observation-ordering issue.
 
-- **Missing frame counters:** A forward jump in the frame counter
-  indicates that some counter values were not observed. This does not
-  necessarily prove packet loss because the missing messages may be
-  outside the captured data interval.
+- **Missing frame counters:** A forward jump in the frame counter indicates that some counter values were not observed. This does not necessarily prove packet loss because the missing messages may be outside the captured data interval.
+
+These features are behavioural indicators. None of them independently proves that an anomaly or attack occurred.
+
 ## Project structure
 
 The project is organised as follows:
 
 ```text
-network-traffic-anomaly-detection/
+lorawan-traffic-anomaly-detection/
 ├── data/
 │   ├── raw/
 │   └── processed/
@@ -69,17 +56,18 @@ network-traffic-anomaly-detection/
 └── README.md
 ```
 
-* `data/raw/` contains the original TXT files collected from the LoRaWAN gateways.
-* `data/processed/` contains the CSV files generated during parsing and feature engineering.
-* `results/` contains parsing error logs and will later store anomaly-detection results.
-* `src/parse_lorawan_events.py` extracts relevant LoRaWAN uplink information from the raw gateway events.
-* `src/build_features.py` calculates radio and behavioural features from consecutive uplink observations.
-* `README.md` documents the project workflow, decisions, results, and limitations.
+- `data/raw/` contains the original TXT files collected from the LoRaWAN gateways.
+- `data/processed/` contains the CSV files generated during parsing and feature engineering.
+- `results/` contains parsing error logs and will later store anomaly-detection results.
+- `src/parse_lorawan_events.py` extracts relevant LoRaWAN uplink information from the raw gateway events.
+- `src/build_features.py` creates temporal segments and calculates radio and behavioural features.
+- `README.md` documents the project workflow, decisions, results, and limitations.
+
+Raw and processed datasets are excluded from version control.
 
 ## Data parsing
 
-Raw LoRaWAN gateway events are processed using
-`src/parse_lorawan_events.py`.
+Raw LoRaWAN gateway events are processed using `src/parse_lorawan_events.py`.
 
 The parser:
 
@@ -91,12 +79,9 @@ The parser:
 - Records malformed JSON lines in an error log
 - Saves the extracted fields in `data/processed/uplinks.csv`
 
-The parser does not detect anomalies. Its purpose is to transform raw
-gateway events into a structured dataset for further analysis.
+The parser does not detect anomalies. Its purpose is to transform raw gateway events into a structured dataset for further analysis.
 
 ### Parsing results
-
-The parser produced the following results:
 
 | Item | Count |
 |---|---:|
@@ -108,104 +93,115 @@ The parser produced the following results:
 | Ignored events | 33,052 |
 | Malformed lines | 0 |
 
-The parser successfully processed all input files without encountering
-any malformed JSON lines.
+The parser successfully processed all input files without encountering malformed JSON lines. The resulting structured dataset was saved to `data/processed/uplinks.csv`.
 
-The resulting structured dataset was saved to:
+## DevAddr grouping and temporal segmentation
 
-`data/processed/uplinks.csv`
+Ordinary LoRaWAN data uplinks in the available dataset do not contain DevEUI. Therefore, the permanent identity of a physical device cannot be determined from these records.
 
-## Device and session identification
+DevAddr is used only to group potentially related observations. It is not treated as a permanent device identifier because:
 
-Ordinary LoRaWAN data uplinks do not normally include the permanent
-device identifier, DevEUI. Therefore, this project uses `DevAddr` to
-group consecutive uplink observations.
-
-However, DevAddr is treated only as a session-level identifier and not
-as a permanent device identity because:
-
-- A device may receive a new DevAddr after starting a new session.
+- A device may receive a new DevAddr after joining a new session.
 - The same DevAddr may be reused in different sessions.
 - Different devices may use the same DevAddr at different times.
 
-The dataset contains:
+To reduce the risk of comparing observations from separate capture periods, each DevAddr group is divided into temporal segments.
+
+A new temporal segment begins when:
+
+- An observation is the first occurrence of a DevAddr.
+- The time since the previous observation with the same DevAddr is greater than 12 hours.
+
+The 12-hour threshold was selected after examining the time-gap distribution. The median time gap was approximately 1.6 hours, while the 75th percentile increased to approximately 20.5 hours, indicating a separation between shorter behavioural sequences and long capture gaps.
 
 | Item | Count |
 |---|---:|
 | Data uplinks | 12,853 |
 | Unique DevAddr values | 8,840 |
-| DevAddr values observed at least twice | 1,889 |
-| DevAddr values observed at least 10 times | 41 |
-| DevAddr values observed at least 50 times | 2 |
+| Temporal segments | 10,071 |
+| Within-segment temporal comparisons | 2,782 |
 
-Most DevAddr values appear only once. Therefore, temporal features can
-only be calculated for DevAddr values observed more than once.
+These temporal segments do not represent verified LoRaWAN sessions or physical devices. They are used only to prevent behavioural features from being calculated across long periods of inactivity.
 
 ## Feature engineering
 
-Feature engineering is performed using:
+Feature engineering is performed using `src/build_features.py`.
 
-`src/build_features.py`
+The script:
 
-The script first removes join requests because they normally do not
-contain a DevAddr. It then removes observations without a valid
-timestamp or DevAddr.
+1. Keeps ordinary data uplinks.
+2. Removes observations without a valid timestamp or DevAddr.
+3. Sorts observations by `dev_addr` and `event_time`.
+4. Divides each DevAddr group into 12-hour temporal segments.
+5. Assigns a generated `session_id` to each segment.
+6. Calculates behavioural changes only within the same segment.
+7. Saves the generated features to `data/processed/features.csv`.
 
-The remaining observations are sorted by:
-
-- `dev_addr`
-- `event_time`
-
-Observations with the same DevAddr are grouped together. Behavioural
-features are then calculated by comparing each observation with the
-previous observation in the same group.
-
-The generated dataset is saved to:
-
-`data/processed/features.csv`
+The generated `session_id` does not represent a verified LoRaWAN session or a physical device. It is only an internal identifier for a temporally segmented DevAddr group.
 
 ### Generated features
 
 | Feature | Description |
 |---|---|
-| `inter_arrival_time` | Time in seconds since the previous observation with the same DevAddr |
-| `log_inter_arrival_time` | Log-transformed inter-arrival time used to reduce the effect of very large time gaps |
+| `inter_arrival_time` | Time in seconds since the previous observation in the same temporal segment |
+| `log_inter_arrival_time` | Log-transformed inter-arrival time used to reduce the influence of large time gaps |
 | `rssi_change` | Difference between the current and previous RSSI values |
 | `snr_change` | Difference between the current and previous SNR values |
 | `payload_size_change` | Difference between the current and previous payload sizes |
 | `f_cnt_gap` | Difference between the current and previous frame counters |
-| `counter_reset_or_wrap` | Indicates that the frame-counter difference is negative |
+| `counter_reset_or_wrap` | Indicates a negative frame-counter difference within a temporal segment |
 | `retransmission_or_reuse` | Indicates that the frame counter has not changed |
-| `missing_counter_count` | Number of counter values skipped in a forward sequence |
-| `log_missing_counter_count` | Log-transformed number of missing counter values |
+| `missing_counter_count` | Number of skipped counter values in a forward sequence |
+| `log_missing_counter_count` | Log-transformed number of skipped counter values |
 | `possible_packet_loss` | Indicates that one or more frame-counter values were not observed |
 
-A missing frame counter does not necessarily prove that a packet was
-lost during radio transmission. The missing message may be outside the
-captured time interval. Therefore, `possible_packet_loss` should be
-interpreted only as an indicator of missing frame-counter values.
+A missing frame-counter value does not necessarily prove that a packet was lost during radio transmission. The missing message may be outside the captured data interval. Therefore, `possible_packet_loss` is interpreted only as a missing-counter indicator.
 
 ### Feature engineering results
 
-The feature engineering script produced 12,853 rows.
+The feature engineering script produced 12,853 rows and divided the observations into 10,071 temporally segmented DevAddr groups.
 
-| Feature | Available values |
+| Feature | Rows where the feature could be calculated |
 |---|---:|
-| `inter_arrival_time` | 4,013 |
-| `log_inter_arrival_time` | 4,013 |
-| `rssi_change` | 4,013 |
-| `snr_change` | 3,947 |
-| `payload_size_change` | 4,013 |
-| `f_cnt_gap` | 3,971 |
-| `missing_counter_count` | 3,971 |
+| `inter_arrival_time` | 2,782 |
+| `log_inter_arrival_time` | 2,782 |
+| `rssi_change` | 2,782 |
+| `snr_change` | 2,733 |
+| `payload_size_change` | 2,782 |
+| `f_cnt_gap` | 2,745 |
+| `missing_counter_count` | 2,745 |
 
-The dataset contains 8,840 unique DevAddr values. The first observation
-of each DevAddr does not have a previous observation and therefore
-cannot have change-based features.
+The first observation in each temporal segment does not have a previous observation in the same segment. Therefore, change-based features cannot be calculated for the first row of each segment:
 
-This explains the number of available inter-arrival values:
+`12,853 total observations - 10,071 segment-starting observations = 2,782 comparisons`
 
-`12,853 total observations - 8,840 first observations = 4,013`
+The number of available SNR and frame-counter features is slightly lower because some original observations do not contain SNR or FCnt values.
 
-After removing rows with missing values in the core modelling features,
-3,905 observations remain available for machine learning.
+After removing rows with missing values in the core modelling features, 2,696 observations remain available for machine learning.
+
+The dataset contains 80 negative frame-counter gaps and 243 zero frame-counter gaps within the temporal segments. These observations are preserved because they may contain useful behavioural information.
+
+A negative frame-counter gap may indicate a counter reset, wraparound, out-of-order observation, or DevAddr reuse. A zero gap may indicate a retransmission or frame-counter reuse. These conditions are treated as indicators rather than confirmed anomalies.
+
+## Current limitations
+
+- The dataset does not contain ground-truth anomaly labels.
+- The number of physical devices cannot be determined because DevEUI is absent from ordinary data uplinks.
+- DevAddr is not a permanent device identifier.
+- The generated temporal segments are not verified LoRaWAN sessions.
+- The 12-hour segmentation threshold is an empirical project assumption.
+- A frame-counter gap does not necessarily indicate actual packet loss.
+- Retransmission cannot be reliably distinguished from frame-counter reuse.
+- Most temporal segments contain only one observation and cannot produce change-based features.
+
+## Next steps
+
+The next phase will:
+
+1. Select complete modelling features while retaining identifiers only as metadata.
+2. Create `data/processed/ml_features.csv`.
+3. Scale numerical features without allowing large values to dominate the model.
+4. Train a baseline unsupervised anomaly-detection model because ground-truth labels are unavailable.
+5. Inspect and interpret the observations identified as anomalous.
+
+The model will not directly use `source_file`, `dev_addr`, `session_id`, or `gateway_id` as predictive features. These fields will be retained only to interpret the model output.

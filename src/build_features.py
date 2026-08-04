@@ -4,9 +4,13 @@ import pandas as pd
 INPUT_FILE = "data/processed/uplinks.csv"
 OUTPUT_FILE = "data/processed/features.csv"
 
+# A new approximate session starts after 12 hours of inactivity
+SESSION_GAP_SECONDS = 12 * 60 * 60
+
+# Load parsed uplink events
 df = pd.read_csv(INPUT_FILE)
 
-# Convert time to datetime
+# Convert event time to UTC datetime
 df["event_time"] = pd.to_datetime(
     df["event_time"],
     errors="coerce",
@@ -16,18 +20,59 @@ df["event_time"] = pd.to_datetime(
 # Keep ordinary data uplinks
 df = df[df["is_join_request"] == False].copy()
 
-# DevAddr is a session-level identifier, not a permanent device identifier
+# Remove rows that cannot be assigned to a temporal group
 df = df.dropna(subset=["event_time", "dev_addr"])
+
+# DevAddr is not treated as a permanent device identifier
 df = df.sort_values(["dev_addr", "event_time"])
 
-grouped = df.groupby("dev_addr", group_keys=False)
+devaddr_grouped = df.groupby(
+    "dev_addr",
+    group_keys=False,
+)
+
+# Time since the previous observation with the same DevAddr
+df["devaddr_time_gap"] = (
+    devaddr_grouped["event_time"]
+    .diff()
+    .dt.total_seconds()
+)
+
+# Start a new approximate session for the first observation or
+# after more than 12 hours of inactivity
+df["new_session"] = (
+    df["devaddr_time_gap"].isna()
+    | (df["devaddr_time_gap"] > SESSION_GAP_SECONDS)
+)
+
+# Number sessions separately for each DevAddr
+df["session_number"] = (
+    df.groupby("dev_addr")["new_session"]
+    .cumsum()
+    .astype(int)
+)
+
+# Create an approximate session identifier
+df["session_id"] = (
+    df["dev_addr"].astype(str)
+    + "_session_"
+    + df["session_number"].astype(str)
+)
+
+# Calculate behavioural changes only within the same session
+grouped = df.groupby(
+    "session_id",
+    group_keys=False,
+)
 
 # Time between consecutive observations
 df["inter_arrival_time"] = (
-    grouped["event_time"].diff().dt.total_seconds()
+    grouped["event_time"]
+    .diff()
+    .dt.total_seconds()
 )
 
-# Log transformation reduces the effect of extremely large time gaps
+# Reduce the influence of extremely large time gaps
 df["log_inter_arrival_time"] = np.log1p(
     df["inter_arrival_time"]
 )
@@ -38,25 +83,27 @@ df["snr_change"] = grouped["snr"].diff()
 df["payload_size_change"] = grouped["payload_size_bytes"].diff()
 df["f_cnt_gap"] = grouped["f_cnt"].diff()
 
-# FCnt behaviour
+# Indicate a counter decrease inside the same approximate session
 df["counter_reset_or_wrap"] = (
     df["f_cnt_gap"] < 0
 ).astype(int)
 
+# Indicate an unchanged frame counter
 df["retransmission_or_reuse"] = (
     df["f_cnt_gap"] == 0
 ).astype(int)
 
-# Number of counters skipped in a forward sequence
+# Count skipped frame-counter values in a forward sequence
 df["missing_counter_count"] = (
     df["f_cnt_gap"] - 1
 ).clip(lower=0)
 
+# Reduce the influence of very large frame-counter gaps
 df["log_missing_counter_count"] = np.log1p(
     df["missing_counter_count"]
 )
 
-# This indicates missing counters, not necessarily actual radio packet loss
+# A counter gap is only a possible indication of packet loss
 df["possible_packet_loss"] = (
     df["missing_counter_count"] > 0
 ).astype(int)
@@ -65,6 +112,8 @@ feature_columns = [
     "event_time",
     "source_file",
     "dev_addr",
+    "session_id",
+    "session_number",
     "gateway_id",
     "rssi",
     "snr",
@@ -89,6 +138,7 @@ features = features.reset_index(drop=True)
 features.to_csv(OUTPUT_FILE, index=False)
 
 print(f"Input rows: {len(df)}")
+print(f"Approximate sessions: {df['session_id'].nunique()}")
 print(f"Features saved to: {OUTPUT_FILE}")
 print()
 print("Feature availability:")
