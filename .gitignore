@@ -23,6 +23,14 @@ venv/
 # Generated files
 results/*.png
 results/*.csv
+results/*.log
+notebooks/Untitled.ipynb
 
 # Operating system
 .DS_Store
+
+# Private raw LoRaWAN datasets
+data/raw/
+data/processed/*.csv
+data/processed/*.parquet
+logs/
