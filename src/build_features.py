@@ -71,6 +71,14 @@ grouped = df.groupby(
     group_keys=False,
 )
 
+# Identify whether the gateway changed between consecutive observations
+df["previous_gateway_id"] = grouped["gateway_id"].shift(1)
+
+df["gateway_changed"] = (
+    df["previous_gateway_id"].notna()
+    & (df["gateway_id"] != df["previous_gateway_id"])
+).astype(int)
+
 # Time between consecutive observations
 df["inter_arrival_time"] = (
     grouped["event_time"]
@@ -93,6 +101,16 @@ df["f_cnt_gap"] = grouped["f_cnt"].diff()
 df["counter_reset_or_wrap"] = (
     df["f_cnt_gap"] < 0
 ).astype(int)
+
+# Measure the magnitude of a frame-counter decrease
+df["counter_decrease_magnitude"] = (
+    -df["f_cnt_gap"]
+).clip(lower=0)
+
+# Reduce the influence of extremely large counter decreases
+df["log_counter_decrease_magnitude"] = np.log1p(
+    df["counter_decrease_magnitude"]
+)
 
 # Indicate an unchanged frame counter
 df["retransmission_or_reuse"] = (
@@ -121,6 +139,8 @@ feature_columns = [
     "session_id",
     "session_number",
     "gateway_id",
+    "previous_gateway_id",
+    "gateway_changed",
     "rssi",
     "snr",
     "payload_size_bytes",
@@ -136,6 +156,8 @@ feature_columns = [
     "missing_counter_count",
     "log_missing_counter_count",
     "possible_packet_loss",
+    "counter_decrease_magnitude",
+    "log_counter_decrease_magnitude",
 ]
 
 features = df[feature_columns].copy()

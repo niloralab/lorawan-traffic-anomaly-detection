@@ -9,12 +9,12 @@ MODEL_FEATURES = [
     "snr",
     "payload_size_bytes",
     "log_inter_arrival_time",
-    "rssi_change",
-    "snr_change",
     "payload_size_change",
     "counter_reset_or_wrap",
     "retransmission_or_reuse",
     "log_missing_counter_count",
+    "gateway_changed",
+    "log_counter_decrease_magnitude",
 ]
 
 METADATA_COLUMNS = [

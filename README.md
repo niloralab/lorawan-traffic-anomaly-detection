@@ -52,18 +52,22 @@ lorawan-traffic-anomaly-detection/
 ├── results/
 ├── src/
 │   ├── parse_lorawan_events.py
-│   └── build_features.py
+│   ├── build_features.py
+│   ├── visualize_features.py
+│   ├── prepare_ml_data.py
+│   └── train_isolation_forest.py
 └── README.md
 ```
 
 - `data/raw/` contains the original TXT files collected from the LoRaWAN gateways.
-- `data/processed/` contains the CSV files generated during parsing and feature engineering.
-- `results/` contains parsing error logs and will later store anomaly-detection results.
+- `data/processed/` contains generated parsing, feature-engineering, modelling, and anomaly-result datasets.
+- `results/` contains parsing logs and generated exploratory visualisations.
 - `src/parse_lorawan_events.py` extracts relevant LoRaWAN uplink information from the raw gateway events.
-- `src/build_features.py` creates temporal segments and calculates radio and behavioural features.
-- `README.md` documents the project workflow, decisions, results, and limitations.
-
-Raw and processed datasets are excluded from version control.
+- `src/build_features.py` creates approximate temporal segments and calculates behavioural features.
+- `src/visualize_features.py` visualises feature distributions, segment lengths, and correlations.
+- `src/prepare_ml_data.py` selects complete modelling features while retaining identifiers as metadata.
+- `src/train_isolation_forest.py` scales the selected features and applies the baseline Isolation Forest model.
+- `README.md` documents the project workflow, methodological decisions, results, and limitations.
 
 ## Data parsing
 
@@ -184,7 +188,7 @@ The first observation in each temporal segment does not have a previous observat
 
 The number of available SNR and frame-counter features is slightly lower because some original observations do not contain SNR or FCnt values.
 
-After removing rows with missing values in the core modelling features, 2,684 observations remain available for machine learning.
+After removing rows with missing values in the core modelling features, 2,708 observations remain available for machine learning.
 
 The dataset contains 80 negative frame-counter gaps and 243 zero frame-counter gaps within the temporal segments. These observations are preserved because they may contain useful behavioural information.
 
@@ -201,14 +205,51 @@ A negative frame-counter gap may indicate a counter reset, wraparound, out-of-or
 - Retransmission cannot be reliably distinguished from frame-counter reuse.
 - Most temporal segments contain only one observation and cannot produce change-based features.
 
-## Next steps
+## Baseline anomaly detection
 
-The next phase will:
+A baseline unsupervised anomaly-detection model is implemented in
+`src/train_isolation_forest.py`.
 
-1. Select complete modelling features while retaining identifiers only as metadata.
-2. Create `data/processed/ml_features.csv`.
-3. Scale numerical features without allowing large values to dominate the model.
-4. Train a baseline unsupervised anomaly-detection model because ground-truth labels are unavailable.
-5. Inspect and interpret the observations identified as anomalous.
+The model uses Isolation Forest because the dataset does not contain
+verified normal or anomalous labels. Before training, the selected
+features are scaled using `RobustScaler` to reduce the influence of
+different numeric ranges and extreme values.
 
-The model will not directly use `source_file`, `dev_addr`, `session_id`, or `gateway_id` as predictive features. These fields will be retained only to interpret the model output.
+The selected modelling features are:
+
+- RSSI
+- SNR
+- Payload size
+- Log-transformed inter-arrival time
+- Payload-size change
+- Counter-decrease indicator
+- Log-transformed counter-decrease magnitude
+- Frame-counter reuse indicator
+- Log-transformed missing-counter count
+- Gateway-change indicator
+
+RSSI and SNR changes are not included in the baseline model because
+60.39% of consecutive within-segment observations were received by
+different gateways. Radio measurements from different gateways are not
+directly comparable.
+
+The model uses a contamination value of 0.05. This is an initial
+assumption that approximately 5% of the modelling observations may be
+unusual; it is not an estimate derived from verified anomaly labels.
+
+### Baseline results
+
+| Item | Count |
+|---|---:|
+| Observations used by the model | 2,708 |
+| Observations marked as unusual | 136 |
+| Marked percentage | 5.02% |
+
+The most unusual observations frequently contain large frame-counter
+decreases combined with payload-size changes, unusual timing, or a
+gateway transition.
+
+These results represent statistical outliers rather than confirmed
+attacks, device failures, counter resets, or verified LoRaWAN sessions.
+Permanent device identity cannot be established because DevEUI is not
+available in ordinary data uplinks.
