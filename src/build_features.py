@@ -6,6 +6,7 @@ OUTPUT_FILE = "data/processed/features.csv"
 
 # A new approximate session starts after 12 hours of inactivity
 SESSION_GAP_SECONDS = 12 * 60 * 60
+MAX_VALID_RSSI = -20
 
 # Load parsed uplink events
 df = pd.read_csv(INPUT_FILE)
@@ -19,6 +20,11 @@ df["event_time"] = pd.to_datetime(
 
 # Keep ordinary data uplinks
 df = df[df["is_join_request"] == False].copy()
+# Mark implausibly high RSSI measurements as missing
+invalid_rssi = df["rssi"] > MAX_VALID_RSSI
+invalid_rssi_count = invalid_rssi.sum()
+
+df.loc[invalid_rssi, "rssi"] = np.nan
 
 # Remove rows that cannot be assigned to a temporal group
 df = df.dropna(subset=["event_time", "dev_addr"])
@@ -143,3 +149,4 @@ print(f"Features saved to: {OUTPUT_FILE}")
 print()
 print("Feature availability:")
 print(features.notna().sum())
+print(f"Invalid RSSI measurements: {invalid_rssi_count}")

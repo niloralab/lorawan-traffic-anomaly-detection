@@ -131,13 +131,20 @@ The script:
 
 1. Keeps ordinary data uplinks.
 2. Removes observations without a valid timestamp or DevAddr.
-3. Sorts observations by `dev_addr` and `event_time`.
-4. Divides each DevAddr group into 12-hour temporal segments.
-5. Assigns a generated `session_id` to each segment.
-6. Calculates behavioural changes only within the same segment.
-7. Saves the generated features to `data/processed/features.csv`.
+3. Treats implausibly high RSSI measurements above -20 dBm as missing.
+4. Sorts observations by `dev_addr` and `event_time`.
+5. Divides each DevAddr group into 12-hour temporal segments.
+6. Assigns a generated `session_id` to each segment.
+7. Calculates behavioural changes only within the same segment.
+8. Saves the generated features to `data/processed/features.csv`.
 
-The generated `session_id` does not represent a verified LoRaWAN session or a physical device. It is only an internal identifier for a temporally segmented DevAddr group.
+The generated `session_id` does not represent a verified LoRaWAN
+session or a physical device. It is only an internal identifier for a
+temporally segmented group of observations.
+
+Eleven RSSI measurements above -20 dBm were considered implausible or
+not directly comparable with the remaining measurements. These values
+were treated as missing rather than deleting their complete observations.
 
 ### Generated features
 
@@ -177,7 +184,7 @@ The first observation in each temporal segment does not have a previous observat
 
 The number of available SNR and frame-counter features is slightly lower because some original observations do not contain SNR or FCnt values.
 
-After removing rows with missing values in the core modelling features, 2,696 observations remain available for machine learning.
+After removing rows with missing values in the core modelling features, 2,684 observations remain available for machine learning.
 
 The dataset contains 80 negative frame-counter gaps and 243 zero frame-counter gaps within the temporal segments. These observations are preserved because they may contain useful behavioural information.
 
