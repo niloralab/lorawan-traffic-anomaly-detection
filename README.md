@@ -68,7 +68,7 @@ lorawan-traffic-anomaly-detection/
 - `src/visualize_features.py` visualises feature distributions, segment lengths, and correlations.
 - `src/prepare_ml_data.py` selects complete modelling features while retaining identifiers as metadata.
 - `src/train_isolation_forest.py` scales the selected features and applies the baseline Isolation Forest model.
-- `src/evaluate_synthetic_anomalies.py` creates a temporal train-test split, injects controlled synthetic anomalies into the testing set, and prepares the data for educational model evaluation.
+- `src/evaluate_synthetic_anomalies.py` creates a temporal train-test split, injects controlled synthetic anomalies into the testing set, trains an Isolation Forest on historical observations, and reports precision, recall, F1-score, and unchanged observations flagged as anomalous.
 - `README.md` documents the project workflow, methodological decisions, results, and limitations.
 
 ## Data parsing
@@ -313,3 +313,39 @@ These labels indicate whether a controlled modification was introduced;
 they do not represent verified LoRaWAN attacks. Unchanged observations
 are used as an experimental baseline but are not guaranteed to be truly
 normal.
+
+### Educational evaluation results
+
+An Isolation Forest containing 200 estimators was fitted only on the
+historical training observations. The fitted model was then applied to
+the testing set containing the controlled synthetic anomalies.
+
+| Result | Count |
+|---|---:|
+| True negatives | 692 |
+| False positives | 40 |
+| False negatives | 0 |
+| True positives | 81 |
+| Total predicted anomalies | 121 |
+
+The resulting evaluation metrics were:
+
+| Metric | Value |
+|---|---:|
+| Precision | 0.669 |
+| Recall | 1.000 |
+| F1-score | 0.802 |
+
+The model identified all 81 injected synthetic anomalies. It also
+flagged 40 unchanged testing observations.
+
+The unchanged flagged observations frequently contained large frame-
+counter decreases, long inter-arrival times, and gateway transitions.
+Therefore, these observations may be natural statistical outliers rather
+than confirmed false alarms.
+
+These results measure the detection of strong controlled modifications.
+They do not represent performance on verified real-world attacks.
+Furthermore, unchanged testing observations are not guaranteed to be
+truly normal because the original dataset does not contain ground-truth
+labels.
