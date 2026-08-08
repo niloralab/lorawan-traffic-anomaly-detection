@@ -55,7 +55,8 @@ lorawan-traffic-anomaly-detection/
 │   ├── build_features.py
 │   ├── visualize_features.py
 │   ├── prepare_ml_data.py
-│   └── train_isolation_forest.py
+│   ├── train_isolation_forest.py
+│   └── evaluate_synthetic_anomalies.py
 └── README.md
 ```
 
@@ -67,6 +68,7 @@ lorawan-traffic-anomaly-detection/
 - `src/visualize_features.py` visualises feature distributions, segment lengths, and correlations.
 - `src/prepare_ml_data.py` selects complete modelling features while retaining identifiers as metadata.
 - `src/train_isolation_forest.py` scales the selected features and applies the baseline Isolation Forest model.
+- `src/evaluate_synthetic_anomalies.py` creates a temporal train-test split, injects controlled synthetic anomalies into the testing set, and prepares the data for educational model evaluation.
 - `README.md` documents the project workflow, methodological decisions, results, and limitations.
 
 ## Data parsing
@@ -253,3 +255,61 @@ These results represent statistical outliers rather than confirmed
 attacks, device failures, counter resets, or verified LoRaWAN sessions.
 Permanent device identity cannot be established because DevEUI is not
 available in ordinary data uplinks.
+
+## Synthetic-anomaly evaluation
+
+The real LoRaWAN dataset does not contain verified normal or attack
+labels. Therefore, the baseline Isolation Forest results cannot be
+evaluated against real ground truth using precision, recall, or F1-score.
+
+To support controlled evaluation and demonstrate the machine-learning
+workflow, `src/evaluate_synthetic_anomalies.py` prepares a separate
+educational experiment using synthetic anomalies.
+
+### Temporal train-test split
+
+The modelling observations are ordered chronologically and divided into:
+
+| Dataset | Observations | Percentage |
+|---|---:|---:|
+| Training set | 1,895 | 70% |
+| Testing set | 813 | 30% |
+
+The training set contains the older observations, while the testing set
+contains the newer observations. There is no temporal overlap between
+the two sets.
+
+This temporal split represents a scenario in which a model learns from
+past observations and is subsequently applied to future traffic.
+
+### Preprocessing
+
+The same ten modelling features used by the baseline model are selected
+for both datasets.
+
+`RobustScaler` is fitted only on the training data. It learns the median
+and interquartile range of each feature from the training set. The same
+learned transformation is then applied to the testing set.
+
+This prevents future testing observations from influencing the
+preprocessing of the training data.
+
+### Controlled anomaly injection
+
+Synthetic anomalies are injected into 10% of the testing observations.
+Using a fixed random seed results in 81 reproducibly selected test rows.
+
+The injected observations contain a controlled combination of:
+
+- an increased inter-arrival time;
+- a substantial payload-size change;
+- an active frame-counter decrease indicator;
+- an increased frame-counter decrease magnitude.
+
+The modified observations receive `synthetic_label = 1`, while unchanged
+testing observations receive `synthetic_label = 0`.
+
+These labels indicate whether a controlled modification was introduced;
+they do not represent verified LoRaWAN attacks. Unchanged observations
+are used as an experimental baseline but are not guaranteed to be truly
+normal.
