@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
@@ -13,6 +14,13 @@ from sklearn.preprocessing import RobustScaler
 
 
 INPUT_PATH = Path("data/processed/ml_data.csv")
+
+METRICS_OUTPUT_PATH = Path(
+    "results/synthetic_evaluation_metrics.csv"
+)
+CONFUSION_MATRIX_OUTPUT_PATH = Path(
+    "results/synthetic_confusion_matrix.png"
+)
 
 TRAIN_RATIO = 0.70
 SYNTHETIC_ANOMALY_RATIO = 0.10
@@ -33,33 +41,101 @@ MODEL_FEATURES = [
 ]
 
 
+def save_confusion_matrix(tn, fp, fn, tp):
+    matrix = np.array(
+        [
+            [tn, fp],
+            [fn, tp],
+        ]
+    )
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    image = ax.imshow(
+        matrix,
+        cmap="Blues",
+    )
+
+    ax.set_title(
+        "Synthetic Anomaly Detection\nConfusion Matrix"
+    )
+    ax.set_xlabel("Predicted label")
+    ax.set_ylabel("Synthetic label")
+
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xticklabels(["Normal", "Anomaly"])
+    ax.set_yticklabels(["Normal", "Anomaly"])
+
+    threshold = matrix.max() / 2
+
+    for row in range(matrix.shape[0]):
+        for column in range(matrix.shape[1]):
+            value = matrix[row, column]
+
+            ax.text(
+                column,
+                row,
+                str(value),
+                ha="center",
+                va="center",
+                color=(
+                    "white"
+                    if value > threshold
+                    else "black"
+                ),
+                fontsize=13,
+            )
+
+    fig.colorbar(image, ax=ax)
+    fig.tight_layout()
+
+    fig.savefig(
+        CONFUSION_MATRIX_OUTPUT_PATH,
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
+
+
 def main():
-    # Load and chronologically order the modelling observations
+    # Create the results directory if it does not exist
+    METRICS_OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # Load and chronologically order the observations
     df = pd.read_csv(
         INPUT_PATH,
         parse_dates=["event_time"],
     )
-    df = df.sort_values("event_time").reset_index(drop=True)
 
-    # Use older observations for training and newer observations for testing
+    df = df.sort_values(
+        "event_time"
+    ).reset_index(drop=True)
+
+    # Use older observations for training
     split_index = int(len(df) * TRAIN_RATIO)
 
     train_df = df.iloc[:split_index].copy()
     test_df = df.iloc[split_index:].copy()
 
-    # Separate predictive features from metadata
+    # Separate model features from metadata
     X_train = train_df[MODEL_FEATURES].copy()
     X_test = test_df[MODEL_FEATURES].copy()
 
-    # Initially treat unchanged test observations as baseline observations
+    # Initially label test observations as unchanged
     y_test = pd.Series(
         0,
         index=X_test.index,
         name="synthetic_label",
     )
 
-    # Reproducibly select test observations for anomaly injection
+    # Select reproducible observations for injection
     rng = np.random.default_rng(RANDOM_STATE)
+
     anomaly_count = int(
         len(X_test) * SYNTHETIC_ANOMALY_RATIO
     )
@@ -91,59 +167,78 @@ def main():
         "log_counter_decrease_magnitude",
     ] += np.log1p(5000)
 
-    # Record which test observations were modified
+    # Label modified observations as synthetic anomalies
     y_test.loc[anomaly_indices] = 1
 
-    # Learn scaling parameters only from training observations
+    # Learn scaling only from training observations
     scaler = RobustScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
 
-    # Apply the training transformation to modified test observations
-    X_test_scaled = scaler.transform(X_test)
+    X_train_scaled = scaler.fit_transform(
+        X_train
+    )
 
-    # Train the model only on historical training observations
+    X_test_scaled = scaler.transform(
+        X_test
+    )
+
+    # Train Isolation Forest on historical observations
     model = IsolationForest(
         n_estimators=200,
         contamination=CONTAMINATION,
         random_state=RANDOM_STATE,
     )
+
     model.fit(X_train_scaled)
 
-    # Score and predict future testing observations
+    # Score and classify testing observations
     anomaly_scores = model.decision_function(
         X_test_scaled
     )
-    raw_predictions = model.predict(X_test_scaled)
 
-    # Convert Isolation Forest output:
-    #  1 means normal  -> 0
-    # -1 means anomaly -> 1
-    y_pred = (raw_predictions == -1).astype(int)
+    raw_predictions = model.predict(
+        X_test_scaled
+    )
 
-    # Compare predictions with controlled synthetic labels
+    # Isolation Forest:
+    #  1 = normal  -> 0
+    # -1 = anomaly -> 1
+    y_pred = (
+        raw_predictions == -1
+    ).astype(int)
+
+    # Calculate the confusion matrix
     tn, fp, fn, tp = confusion_matrix(
         y_test,
         y_pred,
         labels=[0, 1],
     ).ravel()
 
+    # Calculate evaluation metrics
     precision = precision_score(
         y_test,
         y_pred,
         zero_division=0,
     )
+
     recall = recall_score(
         y_test,
         y_pred,
         zero_division=0,
     )
+
     f1 = f1_score(
         y_test,
         y_pred,
         zero_division=0,
     )
 
-    # Combine metadata, modified features, labels, and predictions
+    false_positive_rate = (
+        fp / (fp + tn)
+        if (fp + tn) > 0
+        else 0.0
+    )
+
+    # Combine metadata, features, and predictions
     evaluation_df = test_df[
         [
             "event_time",
@@ -152,12 +247,17 @@ def main():
         ]
     ].copy()
 
-    evaluation_df[MODEL_FEATURES] = X_test[MODEL_FEATURES]
+    evaluation_df[MODEL_FEATURES] = (
+        X_test[MODEL_FEATURES]
+    )
+
     evaluation_df["synthetic_label"] = y_test
     evaluation_df["prediction"] = y_pred
-    evaluation_df["anomaly_score"] = anomaly_scores
+    evaluation_df["anomaly_score"] = (
+        anomaly_scores
+    )
 
-    # Find unchanged observations classified as anomalous
+    # Find unchanged observations flagged as anomalous
     false_positives = evaluation_df[
         (evaluation_df["synthetic_label"] == 0)
         & (evaluation_df["prediction"] == 1)
@@ -166,10 +266,57 @@ def main():
         ascending=True,
     )
 
-    # Report the temporal split
+    # Save evaluation metrics
+    metrics_df = pd.DataFrame(
+        [
+            {
+                "total_observations": len(df),
+                "training_observations": len(
+                    train_df
+                ),
+                "testing_observations": len(
+                    test_df
+                ),
+                "synthetic_anomalies": int(
+                    y_test.sum()
+                ),
+                "true_negatives": int(tn),
+                "false_positives": int(fp),
+                "false_negatives": int(fn),
+                "true_positives": int(tp),
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1,
+                "false_positive_rate": (
+                    false_positive_rate
+                ),
+            }
+        ]
+    )
+
+    metrics_df.to_csv(
+        METRICS_OUTPUT_PATH,
+        index=False,
+    )
+
+    # Save the confusion-matrix figure
+    save_confusion_matrix(
+        tn=tn,
+        fp=fp,
+        fn=fn,
+        tp=tp,
+    )
+
+    # Report dataset split
     print("Total observations:", len(df))
-    print("Training observations:", len(train_df))
-    print("Testing observations:", len(test_df))
+    print(
+        "Training observations:",
+        len(train_df),
+    )
+    print(
+        "Testing observations:",
+        len(test_df),
+    )
 
     print()
     print("Training period:")
@@ -187,7 +334,7 @@ def main():
         test_df["event_time"].max(),
     )
 
-    # Report the modelling matrix dimensions
+    # Report model dimensions
     print()
     print(
         "Number of model features:",
@@ -204,7 +351,7 @@ def main():
         X_test_scaled.shape,
     )
 
-    # Report the synthetic labels
+    # Report synthetic labels
     print()
     print(
         "Injected synthetic anomalies:",
@@ -217,9 +364,11 @@ def main():
 
     print()
     print("Label distribution:")
-    print(y_test.value_counts().sort_index())
+    print(
+        y_test.value_counts().sort_index()
+    )
 
-    # Report model evaluation results
+    # Report evaluation results
     print()
     print("Evaluation results:")
     print("True negatives:", tn)
@@ -231,6 +380,10 @@ def main():
     print("Precision:", f"{precision:.3f}")
     print("Recall:", f"{recall:.3f}")
     print("F1-score:", f"{f1:.3f}")
+    print(
+        "False-positive rate:",
+        f"{false_positive_rate:.3f}",
+    )
     print(
         "Predicted anomalies:",
         int(y_pred.sum()),
@@ -263,6 +416,16 @@ def main():
         false_positives[inspection_columns]
         .head(10)
         .to_string(index=False)
+    )
+
+    print()
+    print(
+        "Saved evaluation metrics to:",
+        METRICS_OUTPUT_PATH,
+    )
+    print(
+        "Saved confusion matrix to:",
+        CONFUSION_MATRIX_OUTPUT_PATH,
     )
 
 
