@@ -1,0 +1,2 @@
+total_observations,training_observations,testing_observations,synthetic_anomalies,true_negatives,false_positives,false_negatives,true_positives,precision,recall,f1_score,false_positive_rate
+2708,1895,813,81,692,40,0,81,0.6694214876033058,1.0,0.801980198019802,0.0546448087431694

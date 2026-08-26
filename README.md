@@ -327,6 +327,14 @@ the testing set containing the controlled synthetic anomalies.
 | False negatives | 0 |
 | True positives | 81 |
 | Total predicted anomalies | 121 |
+| False-positive rate | 0.055 |
+
+The evaluation script also saves the metrics and confusion matrix to:
+
+- `results/synthetic_evaluation_metrics.csv`
+- `results/synthetic_confusion_matrix.png`
+
+![Synthetic anomaly confusion matrix](results/synthetic_confusion_matrix.png)
 
 The resulting evaluation metrics were:
 
