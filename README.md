@@ -357,3 +357,40 @@ They do not represent performance on verified real-world attacks.
 Furthermore, unchanged testing observations are not guaranteed to be
 truly normal because the original dataset does not contain ground-truth
 labels.
+
+### Contamination sensitivity analysis
+
+The `contamination` parameter determines the decision threshold using
+the specified proportion of the most unusual training observations. It
+does not determine how many testing observations must be classified as
+anomalous.
+
+To examine the effect of this assumption, the synthetic evaluation was
+repeated with contamination values of 0.01, 0.03, 0.05, 0.07, and 0.10.
+All experiments used the same temporal train-test split, synthetic
+anomaly indices, feature modifications, scaler, estimator count, and
+random seed. Only the contamination value was changed.
+
+| Contamination | TP | FP | FN | TN | Precision | Recall | F1-score | False-positive rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.01 | 81 | 3 | 0 | 729 | 0.964 | 1.000 | 0.982 | 0.004 |
+| 0.03 | 81 | 25 | 0 | 707 | 0.764 | 1.000 | 0.866 | 0.034 |
+| 0.05 | 81 | 40 | 0 | 692 | 0.669 | 1.000 | 0.802 | 0.055 |
+| 0.07 | 81 | 51 | 0 | 681 | 0.614 | 1.000 | 0.761 | 0.070 |
+| 0.10 | 81 | 72 | 0 | 660 | 0.529 | 1.000 | 0.692 | 0.098 |
+
+All five configurations detected the 81 strong synthetic anomalies.
+Increasing contamination moved the decision threshold so that more
+unchanged testing observations were also classified as anomalous. This
+increased the false-positive rate and reduced precision and F1-score.
+
+A contamination value of 0.01 produced the strongest result in this
+controlled experiment. However, this does not establish 0.01 as the
+optimal value for real LoRaWAN traffic. The injected modifications were
+deliberately strong, and the original dataset does not contain verified
+normal or attack labels.
+
+The complete analysis can be reproduced with:
+
+```bash
+python src/run_contamination_sensitivity.py
